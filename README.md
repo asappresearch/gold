@@ -11,22 +11,18 @@ Paper link: https://arxiv.org/abs/TBD
 
 Blog link: https://www.asapp.com/blog/generating-oos-labels-with-data-augmentation/
 
-![Data Augmentation Pipeline](/assets/images/pipeline.png)
+![Data Augmentation Pipeline](/components/images/pipeline.png)
 
-## Usage
-All code is run by executing the corresponding command within the shell script `run.sh`, which will kick off the data preparation and training within `main.py`.  To use, first unzip the files representing the three datasets found in `data` folder using the `gunzip` command (or similar).  Then comment or uncomment the appropriate lines in the shell script to get desired behavior. Finally, enter `sh run.sh` into the command line to get started.  Use the `--help` option of argparse for flag details or read through the file located within `utils/arguments.py`.
+### Data Prep
+Before running any of the models, the data will need to be in the right place.  To use, first unzip the data object `data.tar.gz` found in root directory using the `tar -xzvf` command (or similar). This should create an `assets` folder with two new directories and a handful of other files.  The two new directories contain three target datasets and six source datasets for training and augmentation, respectively.  Once the data is in place, you can remove the original data object if desired.  When running for the first time, additional pre-processing will occur, with the results saved to cache.
 
-### Preparation
-TBD
+## General Usage
+All experiment code is run by executing the corresponding command within the shell script `run.sh`, which will kick off the data preparation and training within `main.py`.  Please comment or uncomment the appropriate lines in the shell script to get desired behavior. For example, the code to pretrain the baseline methods are at the top and the evaluation of those baselines are in the next section.
 
-### Training
-To specify the task for training, simply use the `--task` option with either `star`, `flow` or `rostd`, for Schema-guided Dialog Dataset, SM Calendar Flow, and Real Out-of-Domain Sentences respectively.  Options for different source datasets are 'OOO', 'TM', 'PC', 'QQP', and 'MIX' which are specified with the `--source-data` flag.  Loading scripts can be tuned to offer various other behaviors.
+To get started, install all major dependencies within `requirements.txt` in a new environment. Next, create an folder to store the model outputs, where the default is folder name is `results`.  As with all other settings, this can be changed by updating the params within `run.sh`.
 
-### Evaluation
-Activate evaluation using the `--do-eval` flag.  By default, `run.sh` will perform evaluation for AUROC and AUPR.  To include other metrics, add the appropriate options of `--metric` or `--method`.
-
-## Data
-TBD
+## Training and Evaluation
+The entire system is governed by argument flags. Kick off training with the `--do-train` option. Activate evaluation using the `--do-eval` flag.  To specify the task for training, simply use the `--task` option with either `star`, `flow` or `rostd`, for Schema-guided Dialog Dataset, SM Calendar Flow, and Real Out-of-Domain Sentences respectively.  Options for different source datasets are 'OOO', 'TM', 'PC', 'QQP', and 'MIX' which are specified with the `--source-data` flag. Extraction techniques depend on the `--technique` flag.  Check for other argument details in the `utils/arguments.py` file or use the `--help` option of argparse.
 
 ## Contact
 Please email dchen@asapp.com for questions or feedback.

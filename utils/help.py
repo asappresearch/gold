@@ -24,27 +24,30 @@ def setup_gpus(args):
     return args
 
 def check_directories(args):
-    version_path = os.path.join(args.output_dir, args.task, args.version)
-    if not os.path.exists(version_path):
-      os.mkdir(version_path)
-      print(f"Created {version_path} directory")
+    task_path = os.path.join(args.output_dir, args.task)
+    if not os.path.exists(task_path):
+        os.mkdir(task_path)
+        print(f"Created {task_path} directory")
     
     if args.version == 'baseline':
-      folder = args.method
+        folder = 'baseline' if args.do_train else args.method
     elif args.version == 'augment':
-      folder = args.technique
-    else:
-      folder = args.model
+        folder = args.technique
     
-    save_path = os.path.join(version_path, folder)
+    save_path = os.path.join(task_path, folder)
     if not os.path.exists(save_path):
         os.mkdir(save_path)
         print(f"Created {save_path} directory")
+    args.save_dir = save_path
 
-    cache_path = os.path.join(args.input_dir, 'cache', args.model)
+    cache_path = os.path.join(args.input_dir, 'cache')
     if not os.path.exists(cache_path):
         os.mkdir(cache_path)
         print(f"Created {cache_path} directory")
+    augmentation_path = os.path.join(args.input_dir, 'augments')
+    if not os.path.exists(augmentation_path):
+        os.mkdir(augmentation_path)
+        print(f"Created {augmentation_path} directory")
 
     if args.debug:
         args.log_interval /= 10

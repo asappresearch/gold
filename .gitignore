@@ -1,2 +1,7 @@
+assets/target/
+assets/source/
+results/
+
 notes.txt
+__pycache__/
 .DS_Store

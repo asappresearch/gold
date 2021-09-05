@@ -33,7 +33,10 @@ class ExperienceLogger:
         self.num_epochs = args.n_epochs
 
         self.best_score = {'epoch': 1, 'accuracy': 0, 'f1_score': 0}
-        self.metric = 'accuracy' if args.version == 'intent' else 'f1_score'
+        if args.version == 'baseline' and args.do_train:
+            self.metric = 'accuracy'
+        else:
+            self.metric = 'f1_score'
         self.do_save = args.do_save
         self.differences = []
         self.logging_loss = 0.0

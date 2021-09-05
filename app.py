@@ -14,10 +14,10 @@ from components.models import IntentModel
 from assets.static_vars import device, debug_break
 
 from utils.help import set_seed, setup_gpus, check_directories
-from utils.process import get_dataloader, grab_intent, process_data, embed_utterance
+from utils.process import get_dataloader, process_data
 from utils.arguments import solicit_params
 from utils.load import load_data, load_tokenizer, load_ontology, load_best_model
-from utils.evaluate import compute_preds, has_majority_vote, generate_clusters
+from utils.evaluate import compute_preds, has_majority_vote
 from utils.augment import embed_by_model, embed_by_paraphrase, embed_by_bow, embed_by_tfidf, embed_by_length
 
 def sample_oos(target_data):
@@ -67,9 +67,8 @@ def swap_for_match(args, oos_sample, candidate, tokenizer):
   return prepared
 
 def prepare_match(args, match, tokenizer):
-  special = {'tokens': [ '[CLS]', '[UNK]', '[SEP]', '[PAD]' ],
-    'segment_ids': [0, 0, 1, 0], 'maximum': [args.max_len, args.max_len - 3]}
-  embedding, segments, input_masks = embed_utterance(args, match.context, tokenizer, special)
+  embed_data = tokenizer(match.context, padding='max_length', truncation=True, max_length=args.max_len)
+  embedding, segments, input_masks = embed_data
   match.embedding = embedding
   match.segments = segments
   match.input_mask = input_masks
@@ -113,18 +112,8 @@ def score_outputs(output, task, method, threshold):
 
   return votes
 
-def select_methods(args):
-  if args.ensemble == 'cat_majority':
-    return ['odin', 'rob_embed', 'dropout']
-  elif args.ensemble == 'top_majority':
-    if args.task == 'star':
-      return ['rob_embed', 'bert_embed', 'entropy']
-    else:
-      return ['rob_embed', 'bert_embed', 'gradient']
-
 def merge_features(raw_data, augment_data):
   _, target_data = raw_data
-
   features = {}
   for split, data in target_data.items():
     if split == 'train':
@@ -153,7 +142,7 @@ def check_cache(args):
     return mixture, True
 
   augment_file = f'augment_{args.num_matches}_{args.source_data}_{args.technique}.pkl'
-  augment_path = os.path.join(args.input_dir, args.task, augment_file)
+  augment_path = os.path.join(args.input_dir, 'augments', augment_file)
   if os.path.exists(augment_path):
     print(f'Loading augmentations from cache at {augment_path}')
     results = pkl.load( open( augment_path, 'rb' ) )
@@ -167,7 +156,7 @@ class MatchMaker(object):
   def __init__(self, args, raw_data, tokenizer, model_class):
     self.technique = args.technique
     self.num_matches = args.num_matches
-    self.distance = args.distance
+    self.distance = 'cosine'
     self.batch_size = 8
     self.task = args.task
 
@@ -197,8 +186,7 @@ class MatchMaker(object):
 
   def initialize_ensemble(self, args, model_class):
     self.model = load_best_model(args, model_class, device)
-    self.vote_threshold = 2 if args.ensemble.endswith('majority') else 3
-    self.methods = select_methods(args)
+    self.methods = ['odin', 'rob_embed', 'dropout']
 
   def build_storage(self, oos_examples, sample_ids):
     # thresholds discovered when tuning on dev set, will differ by setting
@@ -394,7 +382,7 @@ class MatchMaker(object):
   def filter_matches(self, votes, sample_hash):  
     for idx, vote in enumerate(votes):
       within_size_limit = len(self.tracker[sample_hash]) < (self.num_matches + 1)
-      if vote >= self.vote_threshold and within_size_limit:
+      if vote >= 2 and within_size_limit:
         match = self.matches[sample_hash][idx]
         self.stats['keep'] += 1
         self.augment_data.append(match)

@@ -9,16 +9,15 @@ from components.models import BaseModel, IntentModel
 from assets.static_vars import device, debug_break, direct_modes
 
 from utils.help import set_seed, setup_gpus, check_directories, prepare_inputs
-from utils.process import process_data, get_dataloader
-from utils.arguments import solicit_params
+from utils.process import get_dataloader, check_cache, prepare_features, process_data
 from utils.load import load_data, load_tokenizer, load_ontology, load_best_model
-from utils.evaluate import generate_clusters, process_diff, process_drop
-from utils.evaluate import eval_quantify, eval_qualify, run_inference
+from utils.evaluate import make_clusters, process_diff, process_drop, quantify, run_inference
+from utils.arguments import solicit_params
 from app import augment_features
 
 def run_train(args, model, datasets, tokenizer, exp_logger):
   train_dataloader = get_dataloader(args, datasets['train'], split='train')
-  total_steps = len(train_dataloader) // args.grad_accum_steps * args.n_epochs
+  total_steps = len(train_dataloader) // args.n_epochs
   model.setup_optimizer_scheduler(args.learning_rate, total_steps)
 
   for epoch_count in range(exp_logger.num_epochs):
@@ -28,20 +27,18 @@ def run_train(args, model, datasets, tokenizer, exp_logger):
 
     for step, batch in enumerate(train_dataloader):
       inputs, labels = prepare_inputs(batch, model)
-      pred, batch_loss = model(inputs, labels)
-      exp_logger.tr_loss += batch_loss.item()
-      loss = batch_loss / args.grad_accum_steps
+      pred, loss = model(inputs, labels)
+      exp_logger.tr_loss += loss.item()
       loss.backward()
 
       if args.verbose:
         train_results = eval_quantify(args, pred.detach(), labels.detach(), exp_logger, "train")
         train_metric = train_results[exp_logger.metric]
-      if (step + 1) % args.grad_accum_steps == 0:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        model.optimizer.step()  # backprop to update the weights
-        model.scheduler.step()  # Update learning rate schedule
-        model.zero_grad()
-        exp_logger.log_train(step, train_metric)
+      torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+      model.optimizer.step()  # backprop to update the weights
+      model.scheduler.step()  # Update learning rate schedule
+      model.zero_grad()
+      exp_logger.log_train(step, train_metric)
       if args.debug and step >= debug_break*args.log_interval:
         break
 
@@ -64,13 +61,11 @@ def run_eval(args, model, datasets, tokenizer, exp_logger, split='dev'):
   outputs = run_inference(args, model, dataloader, exp_logger, split)
   if args.quantify or split == 'dev':
     if args.version == 'baseline' and args.method in ['bert_embed', 'rob_embed', 'gradient']:
-      clusters = generate_clusters(args, datasets['train'], model, exp_logger, split)
+      clusters = make_clusters(args, datasets['train'], model, exp_logger, split)
       outputs = process_diff(args, clusters, *outputs)
     elif args.version == 'baseline' and args.method == 'dropout':
       outputs = process_drop(args, *outputs, exp_logger)
     results = eval_quantify(args, *outputs, split)
-  if args.qualify:
-    results = eval_qualify(args, *outputs, tokenizer)
   return results
   
 if __name__ == "__main__":
@@ -79,19 +74,25 @@ if __name__ == "__main__":
   args = check_directories(args)
   set_seed(args)
 
-  raw_data = load_data(args)
+  cache_results, already_exist = check_cache(args)
   tokenizer = load_tokenizer(args)
   ontology = load_ontology(args)
 
-  if args.version == 'augment' and not args.do_eval:
-    features = augment_features(args, raw_data, tokenizer, ontology)
-  else: 
-    _, features = raw_data
+  if already_exist:
+    features = cache_results
+  else:
+    target_data = load_data(args, 'target')
+    if args.version == 'augment' and not args.do_eval:
+      source_data = load_data(args, 'source')
+      raw_data = source_data, target_data
+      features = augment_features(args, raw_data, tokenizer, ontology)
+    else: 
+      features = prepare_features(args, target_data, tokenizer, cache_results)
   datasets = process_data(args, features, tokenizer, ontology)
 
-  if args.version in ['direct', 'augment']:
+  if args.version == 'augment':
     model = BaseModel(args, ontology, tokenizer).to(device)
-  elif args.version in ['baseline', 'intent']:
+  elif args.version == 'baseline':
     model = IntentModel(args, ontology, tokenizer).to(device)
   exp_logger = ExperienceLogger(args, model.save_dir)
   

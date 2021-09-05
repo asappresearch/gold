@@ -14,41 +14,27 @@ from scipy.stats import entropy
 
 from utils.help import *
 
-def eval_qualify(args, preds, targets, contexts, texts, tokenizer):
+def qualify(args, preds, targets, contexts, texts, tokenizer):
   results = []
   for pred, target, context, text in zip(preds, targets, contexts, texts):
-    # if pred:
     if target and pred != target:
       context_ids = [x for x in context if x not in [0, 101, 102]]
       history = tokenizer.decode(context_ids)
       history = lorem_ipsum + history
       history = history[-200:]
 
-      if args.do_save:
-        res = history + '---' + text.upper() + '\n'
-        results.append(res)
-      else:
-        print(history)
-        print('Predicted:', 'ambiguous' if pred else 'in scope')
-        print('Actual:', 'ambiguous' if target else 'in scope', text)
-        pdb.set_trace()
+      print(history)
+      print('Predicted:', 'ambiguous' if pred else 'in scope')
+      print('Actual:', 'ambiguous' if target else 'in scope', text)
+      pdb.set_trace()
 
-  if args.do_save:
-    save_filepath = os.path.join(args.output_dir, args.task, args.model, 'qualify.txt')
-    with open(save_filepath, 'w') as file:
-      file.writelines(results)
-    print(len(results), "results written to", save_filepath)
   return results
 
-def eval_quantify(args, preds, targets, exp_logger, split):
-  if args.version == 'intent':
+def quantify(args, preds, targets, exp_logger, split):
+  if args.version == 'baseline' and args.do_train:
     results = accuracy_eval(args, preds, targets, exp_logger)
-  elif args.metric == 'range':
-    results = binary_range(args, preds, targets, exp_logger)
   elif args.metric == 'curve':  
     results = binary_curve(args, preds, targets, exp_logger)
-  elif args.metric == 'fpran':
-    results = binary_fpran(args, preds, targets, exp_logger)
   else:
     results = binary_eval(args, preds, targets, exp_logger)
 
@@ -68,25 +54,6 @@ def accuracy_eval(args, preds, targets, exp_logger):
 
   eval_loss = round(exp_logger.eval_loss, 3)
   results = {'epoch': exp_logger.epoch, 'accuracy': round(acc, 4), 'loss': eval_loss }
-  return results
-
-def binary_range(args, preds, targets, exp_logger=None):
-  results = []
-  for range_thresh, single_preds in preds.items():
-    pred_indices = nonzero(single_preds)
-    positives = list(pred_indices.detach().cpu().numpy())
-    negatives = [x for x in range(len(targets)) if x not in positives]
-
-    true_indices = nonzero(targets)
-    actuals = list(true_indices.detach().cpu().numpy())
-    precision, recall, f1_score = calculate_f1(positives, negatives, actuals, args.verbose)
-
-    single_result = {'epoch': exp_logger.epoch}
-    single_result['threshold'] = round(range_thresh, 3)
-    single_result['precision'] = round(precision, 4)
-    single_result['recall'] = round(recall, 4)
-    single_result['f1_score'] = round(f1_score, 4)
-    results.append(single_result)
   return results
 
 def stable_sum(arr, rtol=1e-05, atol=1e-08):
@@ -278,7 +245,7 @@ def compute_centroids(vectors, labels):
   centroids = torch.stack(centers)          # (num_intents, hidden_dim)
   return centroids
 
-def generate_clusters(args, dataset, model, exp_logger, split):
+def make_clusters(args, dataset, model, exp_logger, split):
   ''' create the clusters and store in cache, number of clusters should equal the number
   of intents.  Each cluster is represented by the coordinates of its centroid location '''
   cache_results, already_done = centroid_cache(args)
@@ -291,40 +258,13 @@ def generate_clusters(args, dataset, model, exp_logger, split):
   print(f'Saved centroids of shape {centroids.shape} to {cache_results}')
   return centroids
 
-def make_covariance_matrix(args, vectors, clusters):
-  if args.distance == 'euclidean': return []
-  print("Creating covariance matrix") 
-  
-  num_intents, hidden_dim = clusters.shape
-  covar = torch.zeros(hidden_dim, hidden_dim)
-  for cluster in progress_bar(clusters, total=num_intents):
-    for vector in vectors:
-      diff = (vector - cluster).unsqueeze(1)  # hidden_dim, 1
-      covar += torch.matmul(diff, diff.T)           # hidden_dim, hidden_dim
-  covar /= len(vectors)                       # divide by a scalar throughout
-  inv_cov_matrix = np.linalg.inv(covar)
-  return torch.tensor(inv_cov_matrix)
-
-def mahala_dist(x, mu, VI):
-  ''' 50% faster than using scipy or sklearn since we keep in torch tensor format '''
-  x_minus_mu = (x - mu).unsqueeze(0)
-  left_term = torch.matmul(x_minus_mu, VI)
-  score = torch.matmul(left_term, x_minus_mu.T)
-  
-  return torch.sqrt(abs(score))
-
 def process_diff(args, clusters, vectors, targets, exp_logger):
   ''' figure out how far from clusters '''
-  inv_cov_matrix = make_covariance_matrix(args, vectors, clusters)
   uncertainty_preds = []
   
   for vector in progress_bar(vectors, total=len(vectors)):
-    if args.distance == 'mahalanobis':
-      distances = [mahala_dist(vector, cluster, inv_cov_matrix) for cluster in clusters]
-      min_distance = min(distances)
-    else:  
-      distances =  torch.cdist(vector.unsqueeze(0), clusters, p=2)  # 2 is for L2-norm
-      min_distance = torch.min(distances)  # each distance is a scalar
+    distances =  torch.cdist(vector.unsqueeze(0), clusters, p=2)  # 2 is for L2-norm
+    min_distance = torch.min(distances)  # each distance is a scalar
     
     if args.metric == 'curve':
       uncertainty_preds.append(min_distance.item())
@@ -361,29 +301,10 @@ def run_inference(args, model, dataloader, exp_logger, split):
       exp_logger.eval_step += 1
       if args.debug and exp_logger.eval_step >= debug_break: break
 
-  preds = pred_range(args, predictions)
-  targets = torch.cat(all_targets)
-
-  if args.qualify:
-    contexts = torch.cat(all_contexts, axis=0)
-    return preds, targets, contexts, texts
-  else:
-    return preds, targets, exp_logger
-
-def pred_range(args, predictions):
   mode = args.method if args.version == 'baseline' else args.version
-
-  if args.metric == 'curve':
-    preds = combine_preds(predictions, mode)
-  elif args.metric == 'efwon':
-    preds = compute_preds(predictions, args.threshold, mode)
-  elif args.metric in ['range', 'fpran']:
-    preds = {}
-    # for diff in [-0.002, -0.001, 0, 0.001, 0.002]:
-    for diff in [-0.08, -0.04, 0, 0.04, 0.08]:
-      range_thresh = args.threshold + diff
-      preds[range_thresh] = compute_preds(predictions, range_thresh, mode)
-  return preds
+  preds = combine_preds(predictions, mode)
+  targets = torch.cat(all_targets)
+  return preds, targets, exp_logger
 
 def combine_preds(predictions, mode):
   # this if for calculating AUROC, which does is not threshold dependent
@@ -403,6 +324,7 @@ def combine_preds(predictions, mode):
   elif mode in ['rob_embed', 'bert_embed', 'gradient']:
     return torch.cat(predictions, axis=0)
 
+# preds = compute_preds(predictions, args.threshold, mode)  # for F1
 def compute_preds(predictions, threshold, mode):
   if mode in ['direct', 'augment']:
     return torch.cat(predictions) > threshold
@@ -425,7 +347,7 @@ def compute_preds(predictions, threshold, mode):
   elif mode.endswith('embed'):
     return torch.cat(predictions, axis=0)
 
-def calculate_f1(pos_list, neg_list, actual_list, do_fpr=False):
+def calculate_f1(pos_list, neg_list, actual_list):
   '''Inputs: suppose we have a batch_size of N binary predictions
     pos_list - list of indexes where we predicted "yes", this is likely to be
       the list of examples that were above a certain threshold
@@ -454,13 +376,8 @@ def calculate_f1(pos_list, neg_list, actual_list, do_fpr=False):
   epsilon = 1e-9
   precision = true_pos / (true_pos + false_pos + epsilon)
   recall = true_pos / (true_pos + false_neg + epsilon)
-
-  if do_fpr:
-    fpran = false_pos / (true_neg + false_pos + epsilon)
-    return precision, recall, fpran
-  else:
-    f1_score = 2 * (precision * recall) / (precision + recall + epsilon)
-    return precision, recall, f1_score
+  f1_score = 2 * (precision * recall) / (precision + recall + epsilon)
+  return precision, recall, f1_score
 
 
 if __name__ == '__main__':

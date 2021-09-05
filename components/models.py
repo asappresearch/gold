@@ -23,29 +23,18 @@ class BaseModel(nn.Module):
 
     self.tokenizer = tokenizer
     self.model_setup(args)
-
     self.verbose = args.verbose
     self.debug = args.debug
-    self.weight_decay = args.weight_decay
 
     self.classify = nn.Linear(args.embed_dim, 1)
     self.sigmoid = nn.Sigmoid()
-    if args.reweight > 0:
-      print("Running with reweighted scheme")
-      weight = torch.FloatTensor([args.reweight]).to(device)
-      self.criterion = nn.BCEWithLogitsLoss(pos_weight=weight)
-    else:
-      self.criterion = nn.BCEWithLogitsLoss()
+    self.criterion = nn.BCEWithLogitsLoss()
  
-    self.save_dir = os.path.join(args.output_dir, args.task, args.version, args.model)
+    self.save_dir = args.save_dir
     if args.version == 'augment':
-      self.save_dir = os.path.join(args.output_dir, args.task, args.version, args.technique)
-      self.load_dir = os.path.join(args.output_dir, args.task, 'intent', args.model)
+      self.load_dir = args.save_dir
     elif args.version == 'baseline':
-      self.save_dir = os.path.join(args.output_dir, args.task, args.version, args.method)
-      self.load_dir = os.path.join(args.output_dir, args.task, 'intent', args.model)
-    else:
-      self.load_dir = self.save_dir
+      self.load_dir = os.path.join(args.output_dir, args.task, 'baseline')
     self.opt_path = os.path.join(self.save_dir, f"optimizer_{args.version}.pt")
     self.schedule_path = os.path.join(self.save_dir, f"scheduler_{args.version}.pt")
 
@@ -83,10 +72,8 @@ class BaseModel(nn.Module):
   def setup_optimizer_scheduler(self, learning_rate, total_steps):
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": self.weight_decay,
-        },
+        {"params": [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0 },
         {"params": [p for n, p in self.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
 
@@ -107,32 +94,17 @@ class IntentModel(BaseModel):
     super().__init__(args, ontology, tokenizer)
     if args.task == 'star':
       target_size = len(ontology['regular'])
-    elif args.task == 'master':
-      target_size = len(ontology['ins'])
     elif args.task == 'rostd':
       target_size = len(ontology['finegrain'])
-    elif args.task == 'clinc':
-      target_size = len(ontology)
     elif args.task == 'flow':
       allowed = list(ontology.keys())
       allowed.remove('Fence')   # OOS examples are never a valid intent
-
-      if args.version == 'flow_filter_pleasant':
-        allowed.remove('Pleasantry')
-      elif args.version == 'flow_filter_other':
-        allowed.remove('Other')
-      elif args.version.startswith('flow_calendar'):
-        allowed.remove('Pleasantry')
-        allowed.remove('Weather')
-        allowed.remove('Places')
-        allowed.remove('Other')
-
+      allowed.remove('Pleasantry')
       target_size = 0
       for category in allowed:
         target_size += len(ontology[category])
 
-    # set this way because temp = 2 is better for rostd and flow
-    self.temperature = args.temperature if args.task == 'star' else 2
+    self.temperature = args.temperature
     self.classify = Classifier(args, target_size)
     self.softmax = nn.LogSoftmax(dim=1)
     self.criterion = nn.CrossEntropyLoss()  # combines LogSoftmax() and NLLLoss()
@@ -162,19 +134,8 @@ class IntentModel(BaseModel):
       output = self.softmax(logit / self.temperature)
     else:                   # used by the 'direct' methods during evaluation
       output = logit
-    return output, loss
 
-class ParaphraseModel(BaseModel):
-  # Main model for paraphrasing an utterance in a dialogue
-  def __init__(self, args, ontology, tokenizer):
-    super().__init__(args, ontology, tokenizer)
-    if args.model == 'bart':
-      self.seq2seq = BartForConditionalGeneration.from_pretrained("facebook/bart-base")
-    elif args.model == 'bart_large':
-      self.seq2seq = BartForConditionalGeneration.from_pretrained("facebook/bart-large", 
-                      force_bos_token_to_be_generated=True)
-    elif args.model == 't5':
-      self.seq2seq = T5ForConditionalGeneration.from_pretrained("t5-3b")
+    return output, loss
 
 class Classifier(nn.Module):
   def __init__(self, args, target_size):
