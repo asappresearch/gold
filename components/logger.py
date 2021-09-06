@@ -8,12 +8,13 @@ import glob
 import shutil
 import time as tm
 
+from transformers import logging as tlog
+tlog.set_verbosity_error()
+
 class ExperienceLogger:
     def __init__(self, args, save_dir):
         self.args = args
         self.learning_rate = args.learning_rate
-        self.data_version = args.version
-        self.version = args.version
         self.task = args.task
         self.source = args.source_data
         self.save_path = save_dir
@@ -22,9 +23,19 @@ class ExperienceLogger:
         self.logger = logging.getLogger(__name__)
         log_path = os.path.join(save_dir, f'v{args.task}.log')
         self.logger.addHandler(logging.FileHandler(log_path))
-        self.logger.debug(args)
-        if args.version != 'baseline':
-          self.log_info(args)
+        self.logger.debug(args)      
+        
+        if args.version == 'baseline':
+            if args.do_train:
+                self.metric = 'accuracy'
+                self.version = 'intent'
+            else:
+                self.metric = 'f1_score'
+                self.version = args.method
+        elif args.version == 'augment':
+            self.metric = 'f1_score'
+            self.version = 'augment'
+            self.log_info(args)
 
         self.global_step = 0
         self.eval_step = 0
@@ -33,10 +44,6 @@ class ExperienceLogger:
         self.num_epochs = args.n_epochs
 
         self.best_score = {'epoch': 1, 'accuracy': 0, 'f1_score': 0}
-        if args.version == 'baseline' and args.do_train:
-            self.metric = 'accuracy'
-        else:
-            self.metric = 'f1_score'
         self.do_save = args.do_save
         self.differences = []
         self.logging_loss = 0.0
@@ -68,10 +75,10 @@ class ExperienceLogger:
         avg_diff = round(np.average(self.differences), 3)
 
         met = round(self.best_score[self.metric] * 100, 2)
-        if self.version in ['direct', 'augment', 'baseline']:
-            self.logger.info(f"Best epoch is {self.best_score['epoch']} with {met}% f1_score")
-        else:
+        if self.version == 'intent':
             self.logger.info(f"Best epoch is {self.best_score['epoch']} with {met}% accuracy")
+        else:
+            self.logger.info(f"Best epoch is {self.best_score['epoch']} with {met}% f1_score")
         self.logger.info(f"Current epoch took {minute_diff} min, average is {avg_diff} min")
 
         return self.early_stop()
@@ -79,13 +86,13 @@ class ExperienceLogger:
     def early_stop(self):
         below_threshold = False
         # if self.args.debug:
-        return below_threshold
+        # return below_threshold
 
-        if self.epoch >= 7 and self.best_score['joint_acc'] > 0.01:
+        if self.epoch >= 7 and self.best_score['accuracy'] < 0.1:
             below_threshold = True
-        if self.epoch >= 14 and self.best_score['joint_acc'] > 0.02:
+        if self.epoch >= 14 and self.best_score['accuracy'] < 0.2:
             below_threshold = True
-        if self.epoch >= 21 and self.best_score['joint_acc'] > 0.03:
+        if self.epoch >= 21 and self.best_score['accuracy'] < 0.3:
             below_threshold = True
 
         if below_threshold:
@@ -115,7 +122,7 @@ class ExperienceLogger:
             if self.version == 'intent':
                 learning_rate = str(self.args.learning_rate)
                 accuracy = str(self.best_score['accuracy'] * 10000)[:3]
-                ckpt_name = f'epoch{self.epoch}_{args.task}_lr{learning_rate}_acc{accuracy}.pt'
+                ckpt_name = f'epoch{self.epoch}_{self.task}_lr{learning_rate}_acc{accuracy}.pt'
             elif self.version == 'augment':
                 precision = str(self.best_score['precision'] * 1000)[:3]
                 recall = str(self.best_score['recall'] * 1000)[:3]

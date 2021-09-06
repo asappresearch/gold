@@ -32,7 +32,7 @@ def run_train(args, model, datasets, tokenizer, exp_logger):
       loss.backward()
 
       if args.verbose:
-        train_results = eval_quantify(args, pred.detach(), labels.detach(), exp_logger, "train")
+        train_results = quantify(args, pred.detach(), labels.detach(), exp_logger, "train")
         train_metric = train_results[exp_logger.metric]
       torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
       model.optimizer.step()  # backprop to update the weights
@@ -59,13 +59,13 @@ def run_eval(args, model, datasets, tokenizer, exp_logger, split='dev'):
     model = load_best_model(args, model, device)
 
   outputs = run_inference(args, model, dataloader, exp_logger, split)
-  if args.quantify or split == 'dev':
-    if args.version == 'baseline' and args.method in ['bert_embed', 'rob_embed', 'gradient']:
-      clusters = make_clusters(args, datasets['train'], model, exp_logger, split)
-      outputs = process_diff(args, clusters, *outputs)
-    elif args.version == 'baseline' and args.method == 'dropout':
-      outputs = process_drop(args, *outputs, exp_logger)
-    results = eval_quantify(args, *outputs, split)
+  if args.version == 'baseline' and args.method in ['bert_embed', 'mahalanobis', 'gradient']:
+    preloader = get_dataloader(args, datasets['train'], split='train')
+    clusters = make_clusters(args, preloader, model, exp_logger, split)
+    outputs = process_diff(args, clusters, *outputs)
+  elif args.version == 'baseline' and args.method == 'dropout':
+    outputs = process_drop(args, *outputs, exp_logger)
+  results = quantify(args, *outputs, split)
   return results
   
 if __name__ == "__main__":
@@ -82,12 +82,10 @@ if __name__ == "__main__":
     features = cache_results
   else:
     target_data = load_data(args, 'target')
+    features = prepare_features(args, target_data, tokenizer, cache_results)
     if args.version == 'augment' and not args.do_eval:
       source_data = load_data(args, 'source')
-      raw_data = source_data, target_data
-      features = augment_features(args, raw_data, tokenizer, ontology)
-    else: 
-      features = prepare_features(args, target_data, tokenizer, cache_results)
+      features = augment_features(args, source_data, features, tokenizer, ontology)
   datasets = process_data(args, features, tokenizer, ontology)
 
   if args.version == 'augment':

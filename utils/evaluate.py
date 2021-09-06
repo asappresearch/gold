@@ -30,21 +30,19 @@ def qualify(args, preds, targets, contexts, texts, tokenizer):
 
   return results
 
-def quantify(args, preds, targets, exp_logger, split):
-  if args.version == 'baseline' and args.do_train:
+def quantify(args, predictions, targets, exp_logger, split):
+  if exp_logger.version == 'intent':
+    preds = torch.argmax(predictions, axis=1)
     results = accuracy_eval(args, preds, targets, exp_logger)
-  elif args.metric == 'curve':  
-    results = binary_curve(args, preds, targets, exp_logger)
+  elif args.debug:
+    y_true = targets.to(torch.int8).numpy()
+    y_score = predictions.numpy()
+    results = {'epoch': exp_logger.epoch, 'auroc': roc_auc_score(y_true, y_score) }
   else:
-    results = binary_eval(args, preds, targets, exp_logger)
+    results = binary_curve(args, predictions, targets, exp_logger)
 
   if split != 'train':
-    if args.metric in ['range', 'fpran']:
-      for single_result in results:
-        exp_logger.log_info(single_result)
-      results = results[2]
-    else:
-      exp_logger.log_info(results)
+    exp_logger.log_info(results)
   return results
 
 def accuracy_eval(args, preds, targets, exp_logger):
@@ -245,14 +243,14 @@ def compute_centroids(vectors, labels):
   centroids = torch.stack(centers)          # (num_intents, hidden_dim)
   return centroids
 
-def make_clusters(args, dataset, model, exp_logger, split):
+def make_clusters(args, dataloader, model, exp_logger, split):
   ''' create the clusters and store in cache, number of clusters should equal the number
   of intents.  Each cluster is represented by the coordinates of its centroid location '''
   cache_results, already_done = centroid_cache(args)
   if already_done:
     return cache_results
 
-  vectors, labels, _ = run_inference(args, dataset, model, exp_logger, split)
+  vectors, labels, _ = run_inference(args, model, dataloader, exp_logger, split)
   centroids = compute_centroids(vectors, labels)
   torch.save(centroids, cache_results)
   print(f'Saved centroids of shape {centroids.shape} to {cache_results}')
@@ -263,15 +261,15 @@ def process_diff(args, clusters, vectors, targets, exp_logger):
   uncertainty_preds = []
   
   for vector in progress_bar(vectors, total=len(vectors)):
-    distances =  torch.cdist(vector.unsqueeze(0), clusters, p=2)  # 2 is for L2-norm
-    min_distance = torch.min(distances)  # each distance is a scalar
-    
-    if args.metric == 'curve':
-      uncertainty_preds.append(min_distance.item())
+    if args.method == 'mahalanobis':
+      distances = [mahala_dist(vector, cluster, inv_cov_matrix) for cluster in clusters]
+      min_distance = min(distances)
     else:
-      # if the min_dist is greater than some threshold, then it is uncertain
-      uncertainty_preds.append(min_distance.item() > args.threshold)
-
+      distances =  torch.cdist(vector.unsqueeze(0), clusters, p=2)  # 2 is for L2-norm
+      min_distance = torch.min(distances)  # each distance is a scalar
+    uncertainty_preds.append(min_distance.item())
+    # if the min_dist is greater than some threshold, then it is uncertain
+    # uncertainty_preds.append(min_distance.item() > args.threshold)
   return torch.tensor(uncertainty_preds), targets, exp_logger
 
 def run_inference(args, model, dataloader, exp_logger, split):
@@ -301,14 +299,13 @@ def run_inference(args, model, dataloader, exp_logger, split):
       exp_logger.eval_step += 1
       if args.debug and exp_logger.eval_step >= debug_break: break
 
-  mode = args.method if args.version == 'baseline' else args.version
-  preds = combine_preds(predictions, mode)
+  preds = combine_preds(predictions, exp_logger.version)
   targets = torch.cat(all_targets)
   return preds, targets, exp_logger
 
 def combine_preds(predictions, mode):
-  # this if for calculating AUROC, which does is not threshold dependent
-  if mode in ['direct', 'augment']:
+  # unlike compute_preds, combine_preds is threshold independent
+  if mode == 'augment':
     return torch.cat(predictions)
   elif mode in ['maxprob', 'odin']:
     joined = torch.cat(predictions, axis=0)          # num_examples, num_classes
@@ -321,30 +318,7 @@ def combine_preds(predictions, mode):
     expo = torch.exp(joined)                         # exponentiation is required due to LogSoftmax
     entropy_vals = entropy(expo, axis=1)
     return entropy_vals
-  elif mode in ['rob_embed', 'bert_embed', 'gradient']:
-    return torch.cat(predictions, axis=0)
-
-# preds = compute_preds(predictions, args.threshold, mode)  # for F1
-def compute_preds(predictions, threshold, mode):
-  if mode in ['direct', 'augment']:
-    return torch.cat(predictions) > threshold
-  elif mode == 'intent':
-    # simply chooses the highest ranked pred, which changes the pred output dimension
-    preds = torch.cat(predictions, axis=0)
-    return torch.argmax(preds, axis=1)
-  elif mode in ['maxprob', 'odin']:
-    # produces results based on the max confidence value of the prediction
-    joined = torch.cat(predictions, axis=0)          # num_examples, num_classes
-    expo = torch.exp(joined)                         # exponentiation is required due to LogSoftmax
-    values, indexes = torch.max(expo, axis=1)
-    return values < threshold
-  elif mode == 'entropy':
-    # produces results based on the prediction entropy which considers the overall distribution
-    joined = torch.cat(predictions, axis=0)          # num_examples, num_classes
-    expo = torch.exp(joined)                         # exponentiation is required due to LogSoftmax
-    entropy_vals = entropy(expo, axis=1)
-    return entropy_vals > threshold
-  elif mode.endswith('embed'):
+  else:   # mahalanobis, bert_embed, gradient, intent
     return torch.cat(predictions, axis=0)
 
 def calculate_f1(pos_list, neg_list, actual_list):
@@ -391,4 +365,5 @@ if __name__ == '__main__':
   # joint_acc, _ = eval_dst(args)
   joint_acc, _ = eval_confidence(args)
   print('joint accuracy: {}%'.format(joint_acc))
+
 

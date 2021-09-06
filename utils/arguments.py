@@ -31,7 +31,7 @@ def solicit_params():
                 choices=['baseline', 'augment', 'direct', 'intent'])
     parser.add_argument("--method", default="maxprob", type=str,
                 help="The baseline method to use when detecting OOS utterances",  # 'likelihood'
-                choices=['maxprob', 'entropy', 'bert_embed', 'rob_embed', 'gradient', 'dropout', 'odin'])
+                choices=['maxprob', 'entropy', 'bert_embed', 'mahalanobis', 'gradient', 'dropout', 'odin'])
     parser.add_argument("--technique", default="tfidf", type=str, 
                 choices=['paraphrase', 'encoder', 'glove', 'tfidf', 'random'],
                 help="Extraction technique for extracting candidates from source data")
@@ -59,6 +59,8 @@ def solicit_params():
                 help="Model learning rate starting point.")
     parser.add_argument("--hidden-dim", default=300, type=int,
                 help="Model hidden dimension.")
+    parser.add_argument("--drop-rate", default=0.0, type=float,
+                help="Dropout rate for model training")
     parser.add_argument("--embed-dim", default=768, type=int,
                 help="The embedding dimension of pretrained LM.")
     parser.add_argument("--adam-epsilon", default=1e-8, type=float,

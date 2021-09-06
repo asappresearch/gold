@@ -55,12 +55,14 @@ def process_data(args, features, tokenizer, ontology):
   if args.verbose:
     print(f"Running with {train_size} train and {dev_size} dev features")
 
+  from collections import Counter
+
   datasets = {}
   for split, feat in features.items():
     if args.version == 'augment':
       datasets[split] = DirectDataset(feat, tokenizer, ontology, split)
     elif args.version == 'baseline':
-      if split == 'train':
+      if split == 'train' or (split == 'dev' and args.do_train):
         ins_data = [x for x in feat if x.oos_label == 0]
         datasets[split] = IntentDataset(ins_data, tokenizer, ontology, split)
       else:

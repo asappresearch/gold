@@ -17,7 +17,7 @@ from utils.help import set_seed, setup_gpus, check_directories
 from utils.process import get_dataloader, process_data
 from utils.arguments import solicit_params
 from utils.load import load_data, load_tokenizer, load_ontology, load_best_model
-from utils.evaluate import compute_preds, has_majority_vote
+from utils.evaluate import has_majority_vote
 from utils.augment import embed_by_model, embed_by_paraphrase, embed_by_bow, embed_by_tfidf, embed_by_length
 
 def sample_oos(target_data):
@@ -84,17 +84,31 @@ def process_inputs(matches):
     }
   return input_batch
 
+def compute_preds(predictions, threshold, mode):
+  if mode in ['maxprob', 'odin']:
+    # produces results based on the max confidence value of the prediction
+    joined = torch.cat(predictions, axis=0)          # num_examples, num_classes
+    expo = torch.exp(joined)                         # exponentiation is required due to LogSoftmax
+    values, indexes = torch.max(expo, axis=1)
+    return values < threshold
+  elif mode == 'entropy':
+    # produces results based on the prediction entropy which considers the overall distribution
+    joined = torch.cat(predictions, axis=0)          # num_examples, num_classes
+    expo = torch.exp(joined)                         # exponentiation is required due to LogSoftmax
+    entropy_vals = entropy(expo, axis=1)
+    return entropy_vals > threshold
+
 def score_outputs(output, task, method, threshold):
   '''Input: the raw model output of batch_size length, 
       a string designating the type of baseline method
   Returns: an array of scores with batch_size length, 
       each score is a binary 0 or 1 indicating OOS'''
-  if method in ['odin', 'maxprob', 'entropy', 'likelihood']:        # score individual output
+  if method in ['odin', 'maxprob', 'entropy']:        # score individual output
     prediction = output.detach().cpu()
     preds = compute_preds([prediction], threshold, method)
     votes = preds if isinstance(preds, np.ndarray) else preds.numpy()
 
-  elif method in ['bert_embed', 'rob_embed', 'gradient']:   # restack into vertical columns
+  elif method in ['bert_embed', 'mahalanobis', 'gradient']:   # restack into vertical columns
     clusters = torch.load(f'assets/cache/{task}_{method}.pt')
     clusters = clusters.to(device)
 
@@ -112,8 +126,7 @@ def score_outputs(output, task, method, threshold):
 
   return votes
 
-def merge_features(raw_data, augment_data):
-  _, target_data = raw_data
+def merge_features(target_data, augment_data):
   features = {}
   for split, data in target_data.items():
     if split == 'train':
@@ -153,7 +166,7 @@ def check_cache(args):
 
 class MatchMaker(object):
 
-  def __init__(self, args, raw_data, tokenizer, model_class):
+  def __init__(self, args, source_data, target_data, tokenizer, model_class):
     self.technique = args.technique
     self.num_matches = args.num_matches
     self.distance = 'cosine'
@@ -162,10 +175,10 @@ class MatchMaker(object):
 
     self.tokenizer = tokenizer
     self.stats = {'skip': 0, 'filter': 0, 'in_scope': 0, 'out_scope': 0, 'round': 0, 'keep': 0}
-    self.initialize_data(args, raw_data)
+    self.initialize_data(args, source_data, target_data)
     self.initialize_ensemble(args, model_class)
 
-  def initialize_data(self, args, raw_data):
+  def initialize_data(self, args, source_data, target_data):
     cache_result, already_done = check_cache(args)
     
     if already_done:
@@ -174,7 +187,6 @@ class MatchMaker(object):
     else:
       self.augment_path = cache_result
       self.pulled_from_cache = False
-      source_data, target_data = raw_data
       self.build_storage(*sample_oos(target_data))
       self.source_data = source_data        # holds natural language candidate utterances
 
@@ -186,16 +198,16 @@ class MatchMaker(object):
 
   def initialize_ensemble(self, args, model_class):
     self.model = load_best_model(args, model_class, device)
-    self.methods = ['odin', 'rob_embed', 'dropout']
+    self.methods = ['odin', 'mahalanobis', 'dropout']
 
   def build_storage(self, oos_examples, sample_ids):
     # thresholds discovered when tuning on dev set, will differ by setting
     thresholds = {'star': {'maxprob': 0.43, 'odin': 0.43, 'bert_embed': 8.9, 'dropout': 0.38, 
-                            'entropy': 1.9,  'gradient': 10.9, 'rob_embed': 11.4},
+                            'entropy': 1.9,  'gradient': 10.9, 'mahalanobis': 11.4},
                   'rostd': {'maxprob': 0.99, 'odin': 0.9, 'bert_embed': 3.6, 'dropout': 0.7,
-                            'entropy': 1.2,  'gradient': 3.6, 'rob_embed': 3.6}, 
+                            'entropy': 1.2,  'gradient': 3.6, 'mahalanobis': 3.6}, 
                   'flow': {'maxprob': 0.99, 'odin': 0.84, 'bert_embed': 7.7, 'dropout': 0.96,
-                            'entropy': 0.5,  'gradient': 7.6, 'rob_embed': 7.4}  }
+                            'entropy': 0.5,  'gradient': 7.6, 'mahalanobis': 7.4}  }
     self.thresholds = thresholds[self.task]
 
     self.target_samples = {}
@@ -205,7 +217,7 @@ class MatchMaker(object):
 
     for idx in sample_ids:
       sample = oos_examples[idx]
-      target_utt = sample.context[-1] if isinstance(sample.context, list) else sample.context
+      target_utt = sample.context[-1] if isinstance(sample.context, list) else sample['context']
       sample_hash = hash(target_utt) % 10**8
 
       self.target_samples[sample_hash] = sample  # holds BaseInstances of the original OOS samples
@@ -216,13 +228,13 @@ class MatchMaker(object):
   def embed_source(self, source, source_type):
     print("Embedding source_data ...")
     if self.technique == 'encoder':
-      embeddings, embedder = embed_with_model(source, source_type)
+      embeddings, embedder = embed_by_model(source, source_type)
     elif self.technique == 'paraphrase':
-      embeddings, embedder = embed_with_paraphrase(source, source_type)
+      embeddings, embedder = embed_by_paraphrase(source, source_type)
     elif self.technique == 'glove':
-      embeddings, embedder = embed_with_bow(source)
+      embeddings, embedder = embed_by_bow(source)
     elif self.technique == 'tfidf':
-      embeddings, embedder = embed_with_tfidf(source)
+      embeddings, embedder = embed_by_tfidf(source)
     elif self.technique == 'length':
       embeddings, embedder = embed_by_length(source)
     elif self.technique == 'random':
@@ -404,9 +416,9 @@ class MatchMaker(object):
       min_values.sort(key=lambda x: x[1]) 
       self.candidates[sample_hash] = [mv[0] for mv in min_values]
 
-def augment_features(args, raw_data, tokenizer, ontology):
+def augment_features(args, source_data, target_data, tokenizer, ontology):
   model_class = IntentModel(args, ontology, tokenizer)
-  maker = MatchMaker(args, raw_data, tokenizer, model_class)
+  maker = MatchMaker(args, source_data, target_data, tokenizer, model_class)
 
   while not maker.enough_augment_data():
     for sample_hash, candidate_hashes in maker.tracker.items():
@@ -417,7 +429,7 @@ def augment_features(args, raw_data, tokenizer, ontology):
   if not maker.pulled_from_cache:
     pkl.dump(maker.augment_data, open(maker.augment_path, 'wb'))
 
-  features = merge_features(raw_data, maker.augment_data)
+  features = merge_features(target_features, maker.augment_data)
   return features
 
 if __name__ == "__main__":

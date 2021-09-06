@@ -99,12 +99,12 @@ class IntentModel(BaseModel):
     elif args.task == 'flow':
       allowed = list(ontology.keys())
       allowed.remove('Fence')   # OOS examples are never a valid intent
-      allowed.remove('Pleasantry')
       target_size = 0
       for category in allowed:
         target_size += len(ontology[category])
-
+    
     self.temperature = args.temperature
+    self.dropout = nn.Dropout(args.drop_rate)
     self.classify = Classifier(args, target_size)
     self.softmax = nn.LogSoftmax(dim=1)
     self.criterion = nn.CrossEntropyLoss()  # combines LogSoftmax() and NLLLoss()
@@ -118,6 +118,8 @@ class IntentModel(BaseModel):
     if outcome == 'odin':
       noise = torch.randn(hidden.shape) * 1e-6      # standard deviaton of epsilon = 1e-6
       hidden += noise.to(device)
+    else:
+      hidden = self.dropout(hidden)
     logit = self.classify(hidden, outcome)          # batch_size, num_intents    
     
     loss = torch.zeros(1)    # set as default loss
@@ -151,4 +153,4 @@ class Classifier(nn.Module):
     # hidden now is (batch_size, hidden_dim)
     logit = self.bottom(middle)
     # logit has shape (batch_size, num_slots)
-    return middle if outcome in ['bert_embed', 'rob_embed', 'gradient'] else logit
+    return middle if outcome in ['bert_embed', 'mahalanobis', 'gradient'] else logit

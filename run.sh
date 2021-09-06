@@ -1,27 +1,24 @@
-python main.py --task star --version augment --learning-rate 3e-5 --n-epochs 14 --do-train --debug
-
 # ====== BASELINE METHODS ======
 #                                  ____ Pre-training Support Models ____
-# python main.py --task star --version baseline --learning-rate 3e-5 --n-epochs 14 --do-train --do-save
+# python main.py --task star --version baseline --learning-rate 1e-5 --n-epochs 3 --do-train --debug
 # python main.py --task flow --version baseline --learning-rate 3e-5 --n-epochs 14 --do-train --do-save
 # python main.py --task rostd --version baseline --learning-rate 1e-5 --n-epochs 14 --do-train --do-save
 
 #                                  _____ Evaluation of Baselines _____
-# python main.py --task star --version baseline --temperature 1 --do-eval --method maxprob
+# python main.py --task star --version baseline --temperature 1.2 --do-eval --method maxprob
 # python main.py --task flow --version baseline --temperature 1.5 --do-eval --method maxprob
 # python main.py --task rostd --version baseline --temperature 1.8 --do-eval --method maxprob
 
-# python main.py --task star --version baseline --temperature 1 --method entropy
-# python main.py --task flow --version baseline --temperature 1.5 --method entropy
-# python main.py --task rostd --version baseline --temperature 2.8 --method entropy
+# python main.py --task star --version baseline --temperature 1 --do-eval --method entropy
+# python main.py --task flow --version baseline --temperature 1.5 --do-eval --method entropy
+# python main.py --task rostd --version baseline --temperature 2.8 --do-eval --method entropy
 
 # (Examples for other methods; Change --task flag to get other target datasets)
 # python main.py --task star --version baseline --batch-size 32 --do-eval --method bert_embed
-# python main.py --task star --version baseline --do-eval --method rob_embed
-# python main.py --task star --version baseline --batch-size 1 --do-eval --method gradient
-# python main.py --task star --version baseline --do-eval --method oracle
+# python main.py --task star --version baseline --model roberta --do-eval --method mahala
+python main.py --task star --version baseline --batch-size 1 --do-eval --method gradient
 # python main.py --task star --version baseline --do-eval --method dropout
-# python main.py --task star --version baseline --do-eval --method odin
+# python main.py --task flow --version baseline --do-eval --method odin
 
 # ========= AUGMENTATION METHODS ========
 #                                  _____ Gold Core Detectors _____
