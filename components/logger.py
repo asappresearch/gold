@@ -30,10 +30,10 @@ class ExperienceLogger:
                 self.metric = 'accuracy'
                 self.version = 'intent'
             else:
-                self.metric = 'f1_score'
+                self.metric = 'aupr'
                 self.version = args.method
         elif args.version == 'augment':
-            self.metric = 'f1_score'
+            self.metric = 'aupr'
             self.version = 'augment'
             self.log_info(args)
 
@@ -43,7 +43,7 @@ class ExperienceLogger:
         self.epoch = 1   # epoch count
         self.num_epochs = args.n_epochs
 
-        self.best_score = {'epoch': 1, 'accuracy': 0, 'f1_score': 0}
+        self.best_score = {'epoch': 1, 'accuracy': 0, 'aupr': 0}
         self.do_save = args.do_save
         self.differences = []
         self.logging_loss = 0.0
@@ -86,7 +86,7 @@ class ExperienceLogger:
     def early_stop(self):
         below_threshold = False
         # if self.args.debug:
-        # return below_threshold
+        return below_threshold
 
         if self.epoch >= 7 and self.best_score['accuracy'] < 0.1:
             below_threshold = True
@@ -124,15 +124,15 @@ class ExperienceLogger:
                 accuracy = str(self.best_score['accuracy'] * 10000)[:3]
                 ckpt_name = f'epoch{self.epoch}_{self.task}_lr{learning_rate}_acc{accuracy}.pt'
             elif self.version == 'augment':
-                precision = str(self.best_score['precision'] * 1000)[:3]
-                recall = str(self.best_score['recall'] * 1000)[:3]
-                f1_score = str(self.best_score['f1_score'] * 1000)[:3]
-                ckpt_name = f'source{self.source}_pre{precision}_rec{recall}_fs{f1_score}.pt'
+                auroc = str(self.best_score['auroc'] * 1000)[:3]
+                aupr = str(self.best_score['aupr'] * 1000)[:3]
+                fpr_score = str(self.best_score['fpr@0.95'] * 1000)[:3]
+                ckpt_name = f'epoch{self.epoch}_fpr{fpr_score}_auroc{auroc}_aupr{aupr}.pt'
             else:
                 precision = str(self.best_score['precision'] * 1000)[:3]
                 recall = str(self.best_score['recall'] * 1000)[:3]
                 f1_score = str(self.best_score['f1_score'] * 1000)[:3]
-                ckpt_name = f'epoch{self.epoch}_pre{precision}_rec{recall}_fs{f1_score}.pt'
+                ckpt_name = f'source{self.source}_pre{precision}_rec{recall}_fs{f1_score}.pt'
             
             ckpt_path = os.path.join(self.save_path, ckpt_name)
             # os.makedirs(ckpt_path, exist_ok=True)

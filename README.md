@@ -7,7 +7,7 @@ Dialogue systems deployed in the real-world frequently encounter ambiguous scena
 
 We propose *G*enerating *O*ut-of-scope *L*abels with *D*ata augmentation (GOLD) as a method of generating OOS samples to improve detection accuracy.  GOLD operates by extracting potential matches from an auxiliary source dataset, generating OOS candidates from the matches, and then filtering those candidates to keep only the best ones for inclusion into the training set.  Our experiments show relative gains of around 50% against the average baseline across three dialogue datasets.  For more details, please see the full paper linked below.
 
-Paper link: https://arxiv.org/abs/TBD
+Paper link: https://arxiv.org/abs/2109.03079
 
 Blog link: https://www.asapp.com/blog/generating-oos-labels-with-data-augmentation/
 

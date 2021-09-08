@@ -7,6 +7,7 @@ import json
 import numpy as np
 import time as tm
 
+from copy import deepcopy
 from numpy.linalg import norm
 from scipy.spatial.distance import mahalanobis as mahala_dist
 from tqdm import tqdm as progress_bar
@@ -55,23 +56,23 @@ def swap_for_match(args, oos_sample, candidate, tokenizer):
   match = deepcopy(oos_sample)
   chat = match.context
 
-  if isinstance(chat, list):
+  if isinstance(chat, list): # star and flow
     max_idx = len(chat) // 2 
     position = random.randint(0,max_idx) * 2
     current_utt = chat[position]
     new_utt = get_speaker(current_utt) + " " + candidate
     match.context[position] = new_utt
-  else:
+  else:                      # rostd and clinc
     match.context = [candidate]
   prepared = prepare_match(args, match, tokenizer)
   return prepared
 
 def prepare_match(args, match, tokenizer):
-  embed_data = tokenizer(match.context, padding='max_length', truncation=True, max_length=args.max_len)
-  embedding, segments, input_masks = embed_data
-  match.embedding = embedding
-  match.segments = segments
-  match.input_mask = input_masks
+  conversation = ' '.join(match.context)
+  embed_data = tokenizer(conversation, padding='max_length', truncation=True, max_length=args.max_len)
+  match.embedding = embed_data['input_ids']
+  match.segments = embed_data['token_type_ids']
+  match.input_mask = embed_data['attention_mask']
   return match
 
 def process_inputs(matches):
@@ -103,6 +104,7 @@ def score_outputs(output, task, method, threshold):
       a string designating the type of baseline method
   Returns: an array of scores with batch_size length, 
       each score is a binary 0 or 1 indicating OOS'''
+  
   if method in ['odin', 'maxprob', 'entropy']:        # score individual output
     prediction = output.detach().cpu()
     preds = compute_preds([prediction], threshold, method)
@@ -137,33 +139,6 @@ def merge_features(target_data, augment_data):
       features[split] = data
   return features
 
-def load_mixture(args):
-  results = []
-  sources = ['QQP', 'TM', 'OOO'] if args.task == 'flow' else ['QQP', 'PC', 'OOO']
-
-  for src in sources:
-    augment_file = f'augment_{args.num_matches}_{src}_{args.technique}.pkl'
-    augment_path = os.path.join(args.input_dir, args.task, augment_file)
-    res = pkl.load( open( augment_path, 'rb' ) )
-    print(f'Loaded {len(res)} augmentations at {augment_path} for MIX')
-    results.extend(res)
-  return results
-
-def check_cache(args):
-  if args.source_data == 'MIX':
-    mixture = load_mixture(args)
-    return mixture, True
-
-  augment_file = f'augment_{args.num_matches}_{args.source_data}_{args.technique}.pkl'
-  augment_path = os.path.join(args.input_dir, 'augments', augment_file)
-  if os.path.exists(augment_path):
-    print(f'Loading augmentations from cache at {augment_path}')
-    results = pkl.load( open( augment_path, 'rb' ) )
-    return results, True
-  else:
-    print(f'Creating new augmentation examples ...')
-    return augment_path, False
-
 class MatchMaker(object):
 
   def __init__(self, args, source_data, target_data, tokenizer, model_class):
@@ -176,29 +151,18 @@ class MatchMaker(object):
     self.tokenizer = tokenizer
     self.stats = {'skip': 0, 'filter': 0, 'in_scope': 0, 'out_scope': 0, 'round': 0, 'keep': 0}
     self.initialize_data(args, source_data, target_data)
-    self.initialize_ensemble(args, model_class)
-
-  def initialize_data(self, args, source_data, target_data):
-    cache_result, already_done = check_cache(args)
-    
-    if already_done:
-      self.pulled_from_cache = True
-      self.augment_data = cache_result
-    else:
-      self.augment_path = cache_result
-      self.pulled_from_cache = False
-      self.build_storage(*sample_oos(target_data))
-      self.source_data = source_data        # holds natural language candidate utterances
-
-      self.augment_data = []                # holds modified BaseInstances were oos_label is set to 1
-      for sample_hash, sample in self.target_samples.items():
-        self.tracker[sample_hash].append(sample_hash)
-        self.augment_data.append(sample)
-      self.commence_augmentation(args.source_data)
-
-  def initialize_ensemble(self, args, model_class):
     self.model = load_best_model(args, model_class, device)
     self.methods = ['odin', 'mahalanobis', 'dropout']
+
+  def initialize_data(self, args, source_data, target_data):
+    self.build_storage(*sample_oos(target_data))
+    self.source_data = source_data        # holds natural language candidate utterances
+
+    self.augment_data = []                # holds modified BaseInstances were oos_label is set to 1
+    for sample_hash, sample in self.target_samples.items():
+      self.tracker[sample_hash].append(sample_hash)
+      self.augment_data.append(sample)
+    self.commence_augmentation(args.source_data)
 
   def build_storage(self, oos_examples, sample_ids):
     # thresholds discovered when tuning on dev set, will differ by setting
@@ -217,7 +181,7 @@ class MatchMaker(object):
 
     for idx in sample_ids:
       sample = oos_examples[idx]
-      target_utt = sample.context[-1] if isinstance(sample.context, list) else sample['context']
+      target_utt = sample.context[-1] if isinstance(sample.context, list) else sample.context
       sample_hash = hash(target_utt) % 10**8
 
       self.target_samples[sample_hash] = sample  # holds BaseInstances of the original OOS samples
@@ -241,6 +205,7 @@ class MatchMaker(object):
       embeddings = source
       def embedder(samples):
         return samples
+      self.distance = 'euclidean'  # reset to prevent further processing 
 
     self.source_embeds = embeddings
     self.embedder = embedder
@@ -277,10 +242,10 @@ class MatchMaker(object):
     self.target_embeds = {h: emb for h, emb in zip(target.keys(), embeddings)}
 
   def enough_augment_data(self):
-    if self.pulled_from_cache or self.stats['round'] > 101:
-      return True
- 
     enough = True
+    if self.stats['round'] > 101:
+      return enough
+    
     total = 0
     hash_batch = []
     for sample_hash, hashes in self.tracker.items():
@@ -416,7 +381,7 @@ class MatchMaker(object):
       min_values.sort(key=lambda x: x[1]) 
       self.candidates[sample_hash] = [mv[0] for mv in min_values]
 
-def augment_features(args, source_data, target_data, tokenizer, ontology):
+def augment_features(args, source_data, target_data, augment_path, tokenizer, ontology):
   model_class = IntentModel(args, ontology, tokenizer)
   maker = MatchMaker(args, source_data, target_data, tokenizer, model_class)
 
@@ -426,10 +391,9 @@ def augment_features(args, source_data, target_data, tokenizer, ontology):
         maker.extract_candidates(args, sample_hash)
         votes = maker.election_day(sample_hash)
         maker.filter_matches(votes, sample_hash)
-  if not maker.pulled_from_cache:
-    pkl.dump(maker.augment_data, open(maker.augment_path, 'wb'))
 
-  features = merge_features(target_features, maker.augment_data)
+  features = merge_features(target_data, maker.augment_data)
+  pkl.dump(features, open(augment_path, 'wb')) 
   return features
 
 if __name__ == "__main__":

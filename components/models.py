@@ -31,10 +31,7 @@ class BaseModel(nn.Module):
     self.criterion = nn.BCEWithLogitsLoss()
  
     self.save_dir = args.save_dir
-    if args.version == 'augment':
-      self.load_dir = args.save_dir
-    elif args.version == 'baseline':
-      self.load_dir = os.path.join(args.output_dir, args.task, 'baseline')
+    self.load_dir = os.path.join(args.output_dir, args.task, 'baseline')
     self.opt_path = os.path.join(self.save_dir, f"optimizer_{args.version}.pt")
     self.schedule_path = os.path.join(self.save_dir, f"scheduler_{args.version}.pt")
 

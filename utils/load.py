@@ -20,7 +20,7 @@ def load_best_model(args, model, device):
 
   for fname in filenames:
     if model.name == 'basic':
-      re_str = r'fs([0-9]{3})\.pt$'
+      re_str = r'aupr([0-9]{3})\.pt$'
     else:
       re_str = r'acc([0-9]{3})\.pt$'
     current_score = re.findall(re_str, fname)

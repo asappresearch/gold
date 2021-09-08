@@ -20,10 +20,34 @@ def get_dataloader(args, dataset, split='train'):
   print(f"Loaded {split} data with {len(dataloader)} batches")
   return dataloader
 
+def load_mixture(args):
+  results = {}
+  sources = ['QQP', 'PC', 'OSQ']
+
+  for src in sources:
+    augment_path = os.path.join(args.input_dir, 'augments', f'{args.task}_{src}.pkl')
+    if not os.path.exists(augment_path):
+      raise ValueError(f"All augmentations must be present to use MIX, but you are missing {src}")
+    
+    res = pkl.load( open( augment_path, 'rb' ) )
+    print(f'Loaded augmentations from {augment_path} for MIX')
+    if len(results) == 0:
+      results = res.copy()
+    else:
+      aug = [x for x in res['train'] if x.oos_label == 1]
+      results['train'].extend(aug)
+
+  return results
+
 def check_cache(args):
   source = 'baseline' if args.version == 'baseline' else args.source_data
-  cache_path = os.path.join(args.input_dir, 'cache', f'{args.task}_{source}.pkl')
+  folder = 'augments' if args.version == 'augment' else 'cache'
+  cache_path = os.path.join(args.input_dir, folder, f'{args.task}_{source}.pkl')
   use_cache = not args.ignore_cache
+
+  if source == 'MIX':
+    mix_results = load_mixture(args)
+    return mix_results, True
 
   if os.path.exists(cache_path) and use_cache:
     print(f'Loading features from cache at {cache_path}')
@@ -39,23 +63,24 @@ def prepare_features(args, target_data, tokenizer, cache_path):
     
     feats = []
     for example in progress_bar(examples, total=len(examples)):
-      conversation = example['context']
-      context = ' '.join(conversation)
-      embed_data = tokenizer(context, padding='max_length', truncation=True, max_length=args.max_len)
+      if isinstance(example['context'], list):
+        conversation = ' '.join(example['context'])
+      else:
+        conversation = example['context']
+      embed_data = tokenizer(conversation, padding='max_length', truncation=True, max_length=args.max_len)
       instance = BaseInstance(embed_data, example)
       feats.append(instance)
     all_features[split] = feats
     print(f'Number of {split} features:', len(feats))
 
-  pkl.dump(all_features, open(cache_path, 'wb'))
+  if args.version == 'baseline':
+    pkl.dump(all_features, open(cache_path, 'wb'))
   return all_features
 
 def process_data(args, features, tokenizer, ontology):
   train_size, dev_size = len(features['train']), len(features['dev'])
   if args.verbose:
     print(f"Running with {train_size} train and {dev_size} dev features")
-
-  from collections import Counter
 
   datasets = {}
   for split, feat in features.items():

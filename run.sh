@@ -1,8 +1,8 @@
 # ====== BASELINE METHODS ======
 #                                  ____ Pre-training Support Models ____
-# python main.py --task star --version baseline --learning-rate 1e-5 --n-epochs 3 --do-train --debug
-# python main.py --task flow --version baseline --learning-rate 3e-5 --n-epochs 14 --do-train --do-save
-# python main.py --task rostd --version baseline --learning-rate 1e-5 --n-epochs 14 --do-train --do-save
+python main.py --task star --version baseline --learning-rate 1e-5 --n-epochs 14 --do-train --do-save
+python main.py --task flow --version baseline --learning-rate 3e-5 --n-epochs 14 --do-train --do-save
+python main.py --task rostd --version baseline --learning-rate 1e-5 --n-epochs 14 --do-train --do-save
 
 #                                  _____ Evaluation of Baselines _____
 # python main.py --task star --version baseline --temperature 1.2 --do-eval --method maxprob
@@ -15,9 +15,10 @@
 
 # (Examples for other methods; Change --task flag to get other target datasets)
 # python main.py --task star --version baseline --batch-size 32 --do-eval --method bert_embed
-# python main.py --task star --version baseline --model roberta --do-eval --method mahala
-python main.py --task star --version baseline --batch-size 1 --do-eval --method gradient
-# python main.py --task star --version baseline --do-eval --method dropout
+# python main.py --task star --version baseline --model roberta --do-eval --method mahalanobis
+# python main.py --task rostd --version baseline --model bert --do-eval --method dropout
+# python main.py --task rostd --version baseline --batch-size 1 --do-eval --method gradient
+# python main.py --task flow --version baseline --do-eval --method dropout
 # python main.py --task flow --version baseline --do-eval --method odin
 
 # ========= AUGMENTATION METHODS ========
@@ -26,7 +27,7 @@ python main.py --task star --version baseline --batch-size 1 --do-eval --method 
 # python main.py --task star --version augment --learning-rate 1e-5  --n-epochs 7  --do-train --do-save \
 #      --technique glove --source-data PC --num-matches 24 --batch-size 16 --temperature 1.2
 # python main.py --task star --version augment --learning-rate 1e-5  --n-epochs 7  --do-train --do-save \
-#      --technique tfidf --source-data PC --num-matches 24 --batch-size 16 --temperature 1.2
+#     --technique tfidf --source-data PC --num-matches 24 --batch-size 16 --temperature 1.2 --ignore-cache
 # python main.py --task star --version augment --learning-rate 1e-5  --n-epochs 7  --do-train --do-save \
 #      --technique paraphrase --source-data PC --num-matches 24 --batch-size 16 --temperature 1.2
 # python main.py --task star --version augment --learning-rate 1e-5  --n-epochs 7  --do-train --do-save \

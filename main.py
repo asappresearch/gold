@@ -85,7 +85,7 @@ if __name__ == "__main__":
     features = prepare_features(args, target_data, tokenizer, cache_results)
     if args.version == 'augment' and not args.do_eval:
       source_data = load_data(args, 'source')
-      features = augment_features(args, source_data, features, tokenizer, ontology)
+      features = augment_features(args, source_data, features, cache_results, tokenizer, ontology)
   datasets = process_data(args, features, tokenizer, ontology)
 
   if args.version == 'augment':

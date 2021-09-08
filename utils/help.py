@@ -12,6 +12,8 @@ def set_seed(args):
     torch.manual_seed(args.seed)
     if args.n_gpu > 0:
         torch.cuda.manual_seed_all(args.seed)
+    if args.verbose:
+        print(args)
 
 def setup_gpus(args):
     n_gpu = 0  # set the default to 0
@@ -43,6 +45,8 @@ def check_directories(args):
     cache_path = os.path.join(args.input_dir, 'cache')
     if not os.path.exists(cache_path):
         os.mkdir(cache_path)
+        os.mkdir( os.path.join(cache_path, 'source') )
+        os.mkdir( os.path.join(cache_path, 'target') )
         print(f"Created {cache_path} directory")
     augmentation_path = os.path.join(args.input_dir, 'augments')
     if not os.path.exists(augmentation_path):

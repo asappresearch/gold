@@ -34,10 +34,10 @@ def quantify(args, predictions, targets, exp_logger, split):
   if exp_logger.version == 'intent':
     preds = torch.argmax(predictions, axis=1)
     results = accuracy_eval(args, preds, targets, exp_logger)
-  elif args.debug:
-    y_true = targets.to(torch.int8).numpy()
-    y_score = predictions.numpy()
-    results = {'epoch': exp_logger.epoch, 'auroc': roc_auc_score(y_true, y_score) }
+  elif args.debug or split == 'train':
+    y_true = targets.to(torch.int8).cpu().numpy()
+    y_score = predictions.cpu().numpy()
+    results = {'epoch': exp_logger.epoch, 'aupr': average_precision_score(y_true, y_score) }
   else:
     results = binary_curve(args, predictions, targets, exp_logger)
 
@@ -256,8 +256,30 @@ def make_clusters(args, dataloader, model, exp_logger, split):
   print(f'Saved centroids of shape {centroids.shape} to {cache_results}')
   return centroids
 
+def make_covariance_matrix(args, vectors, clusters):
+  if args.verbose:
+    print("Creating covariance matrix")
+
+  num_intents, hidden_dim = clusters.shape
+  covar = torch.zeros(hidden_dim, hidden_dim)
+  for cluster in progress_bar(clusters, total=num_intents):
+    for vector in vectors:
+      diff = (vector - cluster).unsqueeze(1)  # hidden_dim, 1
+      covar += torch.matmul(diff, diff.T)           # hidden_dim, hidden_dim
+  covar /= len(vectors)                       # divide by a scalar throughout
+  inv_cov_matrix = np.linalg.inv(covar)
+  return torch.tensor(inv_cov_matrix)
+
+def mahala_dist(x, mu, VI):
+  ''' 50% faster than using scipy or sklearn since we keep in torch tensor format '''
+  x_minus_mu = (x - mu).unsqueeze(0)
+  left_term = torch.matmul(x_minus_mu, VI)
+  score = torch.matmul(left_term, x_minus_mu.T)
+  return torch.sqrt(abs(score))
+
 def process_diff(args, clusters, vectors, targets, exp_logger):
   ''' figure out how far from clusters '''
+  inv_cov_matrix = make_covariance_matrix(args, vectors, clusters)
   uncertainty_preds = []
   
   for vector in progress_bar(vectors, total=len(vectors)):
