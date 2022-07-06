@@ -28,5 +28,19 @@ The entire system is governed by argument flags. Kick off training with the `--d
 Please email dchen@asapp.com for questions or feedback.
 
 ## Citation
-TBD
+```
+@inproceedings{chen2021gold,
+    title = "{GOLD}: Improving Out-of-Scope Detection in Dialogues using Data Augmentation",
+    author = "Chen, Derek  and
+      Yu, Zhou",
+    booktitle = "Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing",
+    month = nov,
+    year = "2021",
+    address = "Online and Punta Cana, Dominican Republic",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2021.emnlp-main.35",
+    doi = "10.18653/v1/2021.emnlp-main.35",
+    pages = "429--442"
+}
 
+```
